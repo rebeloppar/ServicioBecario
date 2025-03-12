@@ -6,7 +6,7 @@
 
 ############################### Librerías ####################################
 library(pacman)
-p_load(tidyverse, ggthemes, googledrive, data.table)
+p_load(tidyverse, ggthemes, data.table)
 
 ############################### Datos ########################################
 
@@ -20,15 +20,40 @@ download.file(url, destfile, mode = "wb")
 # Cargar el archivo en un objeto "delitos"
 delitos <- fread(destfile, encoding = "Latin-1")
 
-# Asegurar que las claves sean de tipo carácter (string)
-delitos[, Clave_Ent := sprintf("%02d", as.integer(Clave_Ent))]
+############################# Limpieza #######################################
 
-# Modificar la clave del municipio, agregando un 0 solo si tiene un solo dígito
-delitos[, Clave_Mun := sprintf("%02d", as.integer(`Cve. Municipio`))]
-
-# Eliminar la columna original
-delitos[, `Cve. Municipio` := NULL]
+# Asegurar que las claves sean de tipo carácter (string) con dos dígitos
+delitos <- delitos %>%
+  mutate(
+    Clave_Ent = str_pad(Clave_Ent, width = 2, side = "left", pad = "0"),
+    Clave_Mun = str_pad(`Cve. Municipio`, width = 5, side = "left", pad = "0")
+  ) %>%
+  select(-`Cve. Municipio`)  # Eliminar la columna original
 
 # Reordenar la columna `Clave_Mun` en la posición 4
-setcolorder(delitos, c(names(delitos)[1:3], "Clave_Mun", names(delitos)[4:(ncol(delitos)-1)]))
+delitos <- delitos %>%
+  relocate(Clave_Mun, .after = 3)
 
+# Filtrar solo violencia familiar
+violencia_familiar <- delitos %>% 
+  filter(`Tipo de delito` == "Violencia familiar")
+
+# Convertir columnas de meses a formato tidy
+violencia_familiar <- violencia_familiar %>% 
+  pivot_longer(cols = Enero:Diciembre,
+               names_to = "Mes",
+               values_to = "Delitos")
+
+# Crear un diccionario de nombres de meses a números
+meses_dict <- c(
+  "Enero" = "01", "Febrero" = "02", "Marzo" = "03",
+  "Abril" = "04", "Mayo" = "05", "Junio" = "06",
+  "Julio" = "07", "Agosto" = "08", "Septiembre" = "09",
+  "Octubre" = "10", "Noviembre" = "11", "Diciembre" = "12"
+)
+
+# Convertir los nombres de los meses a formato numérico y crear fecha
+violencia_familiar <- violencia_familiar %>%
+  mutate(Mes_Num = meses_dict[Mes],  # Reemplazar nombres por números
+         Fecha = paste0(Mes_Num, "-", Año)) %>%  # Formato mm-yyyy
+  select(-Mes_Num)  # Eliminar columna auxiliar
