@@ -6,7 +6,7 @@
 
 ############################### Librerías ####################################
 library(pacman)
-p_load(tidyverse, ggthemes, data.table)
+p_load(tidyverse, ggthemes, data.table, readr)
 
 ############################### Delitos ########################################
 
@@ -60,6 +60,7 @@ violencia_familiar <- violencia_familiar %>%
 
 
 ############################### Censo ########################################
+
 options(timeout = 300)  # Aumenta el tiempo de espera a 5 minutos (300 segundos)
 
 # Definir URL y destino del archivo ZIP
@@ -165,3 +166,5 @@ violencia_familiar <- violencia_familiar %>%
 # Filtrar fechas
 violencia_familiar <- violencia_familiar %>%
   filter(as.Date(paste0("01-", Fecha), format = "%d-%m-%Y") < as.Date("2025-02-01"))
+
+
