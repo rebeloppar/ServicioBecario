@@ -169,87 +169,63 @@ violencia_familiar <- violencia_familiar %>%
 
 ################################### ENOE ######################################
 
-# 1. Generar las URLs de descarga considerando el cambio de formato desde 2023
-años <- 2020:2024
-trimestres <- 3:4  # Solo 3T y 4T en 2020
-trimestres_full <- 1:4  # Desde 2021 en adelante
+# URL base del repositorio en GitHub
+url_base <- "https://media.githubusercontent.com/media/marcomna/ServicioBecario/refs/heads/main/TrimestreEcon%C3%B3mico/Datos/ENOE/"
 
-urls <- unlist(lapply(años, function(año) {
-  trimestres_usar <- ifelse(año == 2020, trimestres, trimestres_full)
-  if (año < 2023) {
-    formato <- "enoe_n_%d_trim%d_csv.zip"  # Hasta 2022
-  } else {
-    formato <- "enoe_%d_trim%d_csv.zip"  # Desde 2023
-  }
-  sprintf(paste0("https://www.inegi.org.mx/contenidos/programas/enoe/15ymas/microdatos/", formato),
-          año, trimestres_usar)
-}))
+# Identificar las tablas COE1T y COE2T
+categorias_coe <- c("COE1T", "COE2T")
 
-# 2. Carpeta temporal para almacenamiento
-dir_temp <- "data/enoe/"
-dir_create(dir_temp)
+# Posibles sufijos de los archivos (para identificar año y trimestre)
+sufijos <- expand.grid(
+  año = c("121", "122", "221", "222", "320", "321", "322", "420", "421", "422"),
+  tipo = categorias_coe
+) %>%
+  mutate(nombre_archivo = paste0("ENOEN_", tipo, año, ".csv")) %>%
+  pull(nombre_archivo)
 
-# 3. Función para descargar, descomprimir y leer cada tabla de la ENOE
-leer_enoe_tablas <- function(url) {
-  match <- regmatches(url, regexec("enoe(_n)?_(\\d+)_trim(\\d+)_csv.zip", url))
-  año <- match[[1]][3]
-  trimestre <- match[[1]][4]
-  etiqueta_trimestre <- paste0("ENOE-", año, "T", trimestre)
+# Construir las URLs completas
+urls_csv <- paste0(url_base, sufijos)
+
+# Función para leer y consolidar COE
+leer_y_consolidar_COE <- function() {
+  archivos_coe <- urls_csv[grepl("COE", urls_csv)]  # Filtrar solo COE1T y COE2T
   
-  archivo_zip <- file.path(dir_temp, paste0("enoe_", año, "T", trimestre, ".zip"))
-  carpeta_descomprimida <- file.path(dir_temp, paste0("enoe_", año, "T", trimestre))
-  
-  # Descargar solo si no existe
-  if (!file.exists(archivo_zip)) {
-    cat("📥 Descargando:", url, "\n")
-    res <- try(GET(url, write_disk(archivo_zip, overwrite = TRUE)), silent = TRUE)
-    if (inherits(res, "try-error")) return(NULL)
-  }
-  
-  # Verificar integridad del ZIP
-  if (!file.exists(archivo_zip) || file.size(archivo_zip) < 1000) {
-    cat("❌ Archivo corrupto o no descargado:", archivo_zip, "\n")
-    return(NULL)
-  }
-  
-  # Listar contenido del ZIP
-  contenido_zip <- try(zip_list(archivo_zip), silent = TRUE)
-  if (inherits(contenido_zip, "try-error")) return(NULL)
-  
-  # Tablas esperadas
-  categorias <- c("COE1T", "COE2T", "HOGT", "SDEMT", "VIVT")
-  tablas_enoe <- list()
-  
-  for (categoria in categorias) {
-    archivos_csv <- contenido_zip$filename[grepl(paste0(categoria, "\\d+\\.csv$"), contenido_zip$filename, ignore.case = TRUE)]
-    if (length(archivos_csv) > 0) {
-      archivo_extraer <- archivos_csv[which.max(contenido_zip$uncompressed_size)]
-      unzip(archivo_zip, files = archivo_extraer, exdir = carpeta_descomprimida)
-      archivo_csv <- file.path(carpeta_descomprimida, archivo_extraer)
-      
-      # Leer CSV
-      df <- try(read_csv(archivo_csv, col_types = cols()), silent = TRUE)
-      if (!inherits(df, "try-error")) {
-        df <- df %>% mutate(Trimestre = etiqueta_trimestre, .before = 1)
-        tablas_enoe[[categoria]] <- df
-        cat("📂 Cargado:", categoria, "para", etiqueta_trimestre, "\n")
-      }
+  enoe_coe <- map_dfr(archivos_coe, function(url) {
+    # Extraer el nombre del archivo
+    archivo_nombre <- basename(url)
+    
+    # Extraer año y trimestre del nombre del archivo
+    match <- regmatches(archivo_nombre, regexec("ENOEN_(\\w+)(\\d{3})\\.csv", archivo_nombre))
+    if (length(match[[1]]) == 4) {
+      año <- substr(match[[1]][3], 1, 2)  # Dos primeros dígitos
+      trimestre <- substr(match[[1]][3], 3, 3)  # Último dígito
+      año_completo <- ifelse(as.numeric(año) < 30, paste0("20", año), paste0("19", año))  # Ajuste de año
+      etiqueta_trimestre <- paste0("ENOE-", año_completo, "T", trimestre)
+    } else {
+      etiqueta_trimestre <- NA
     }
-  }
-  return(tablas_enoe)
+    
+    # Intentar leer el CSV
+    df <- try(read_csv(url, col_types = cols(.default = "c")), silent = TRUE)  # Convierte todo a character
+    
+    if (!inherits(df, "try-error")) {
+      df <- df %>% mutate(Trimestre = etiqueta_trimestre, .before = 1)
+    } else {
+      df <- tibble()
+    }
+    
+    return(df)
+  })
+  
+  return(enoe_coe)
 }
 
-# 4. Descargar y procesar todas las ENOEs
-enoe_datos <- map(urls, possibly(leer_enoe_tablas, otherwise = NULL))
+# Ejecutar la función para consolidar COE
+enoe_coe <- leer_y_consolidar_COE()
 
-# 5. Unir bases por tipo de tabla
-categorias <- c("COE1T", "COE2T", "HOGT", "SDEMT", "VIVT")
-enoe_finales <- map(categorias, ~ map_dfr(enoe_datos, \(x) x[[.x]]))
-names(enoe_finales) <- categorias
+# Guardar la base consolidada de COE
+write_csv(enoe_coe, "consolidado_coe.csv")
 
-# 6. Guardar bases separadas
-walk2(enoe_finales, categorias, ~ write_csv(.x, paste0("enoe_", tolower(.y), ".csv")))
-
-# 7. Mostrar resumen
-lapply(enoe_finales, head)
+# Mostrar primeras filas
+head(enoe_coe)
 
