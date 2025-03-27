@@ -1,6 +1,7 @@
 ###################### Homologación municipios ###############################
 
 # Librerías necesarias
+install.packages("pacman")
 library(pacman)
 p_load(readr, tidyverse, stringdist, fuzzyjoin)
 
